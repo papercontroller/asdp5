@@ -1,0 +1,58 @@
+name: Campus IoT IDS CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-and-build:
+    name: Continuous Integration & Verification
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Lint and Static Code Analysis
+      run: |
+        flake8 src/ tests/ --max-line-length=120 --statistics
+
+    - name: Run Pytest Suite with Coverage
+      run: |
+        mkdir -p reports
+        pytest -v --junitxml=reports/junit-results.xml --cov=src --cov-report=xml:reports/coverage.xml tests/
+
+    - name: Publish Test Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-and-coverage-reports
+        path: reports/
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker Container
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: campus-iot-ids:latest,campus-iot-ids:${{ github.sha }}
+        load: true
+
+    - name: Container Integration Smoke Test
+      run: |
+        docker run --rm campus-iot-ids:latest pytest -v tests/
+        docker run --rm campus-iot-ids:latest python -m src.ids.cli --test-flow --attack-type DoS_Publish_Flood
